@@ -43,30 +43,100 @@ def get_grok_text(prompt):
     )
     return response.choices[0].message.content
 
-def create_fancy_doc(title, content):
+def create_professional_doc(title, content):
     doc = docs_service.documents().create(body={"title": title}).execute()
     doc_id = doc["documentId"]
     requests = []
 
-    content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)  # Remove asterisks
-    full_text = content.replace("\n\n", "\n") + "\n"
+    # Clean up Markdown artifacts (e.g., remove **, *, >, #)
+    content = re.sub(r'[\*#>]+', '', content).strip()
+
+    # Insert all text first, adding extra newlines for spacing
+    full_text = content.replace("\n\n", "\n").replace("\n", "\n\n") + "\n\n"
     requests.append({"insertText": {"location": {"index": 1}, "text": full_text}})
     docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
     requests = []
 
+    # Apply professional formatting
     lines = full_text.split("\n")
     index = 1
+
     for i, line in enumerate(lines):
         line = line.strip()
         if not line:
-            index += 1
+            index += 2  # Account for double newline
             continue
-        if i == 0:  # Title
-            requests.append({"updateParagraphStyle": {"range": {"startIndex": index, "endIndex": index + len(line)}, "paragraphStyle": {"alignment": "CENTER"}, "fields": "alignment"}})
-            requests.append({"updateTextStyle": {"range": {"startIndex": index, "endIndex": index + len(line)}, "textStyle": {"fontSize": {"magnitude": 16, "unit": "PT"}, "bold": True}, "fields": "fontSize,bold"}})
-        else:  # Body text
-            requests.append({"updateTextStyle": {"range": {"startIndex": index, "endIndex": index + len(line)}, "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}}, "fields": "fontSize"}})
-        index += len(line) + 1
+        if i == 0:  # Title: centered, bold, larger font
+            requests.append({
+                "updateParagraphStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "paragraphStyle": {"alignment": "CENTER", "spaceBelow": {"magnitude": 12, "unit": "PT"}},
+                    "fields": "alignment,spaceBelow"
+                }
+            })
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "textStyle": {"fontSize": {"magnitude": 16, "unit": "PT"}, "bold": True, "weightedFontFamily": {"fontFamily": "Arial"}},
+                    "fields": "fontSize,bold,weightedFontFamily"
+                }
+            })
+            index += len(line) + 2
+        elif any(line.lower().startswith(x) for x in ["services provided", "services not included", "service level agreement", "term and termination"]):
+            # Section headings: bold, slightly larger font, spacing
+            requests.append({
+                "updateParagraphStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "paragraphStyle": {"spaceAbove": {"magnitude": 12, "unit": "PT"}, "spaceBelow": {"magnitude": 6, "unit": "PT"}},
+                    "fields": "spaceAbove,spaceBelow"
+                }
+            })
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "textStyle": {"fontSize": {"magnitude": 12, "unit": "PT"}, "bold": True, "weightedFontFamily": {"fontFamily": "Arial"}},
+                    "fields": "fontSize,bold,weightedFontFamily"
+                }
+            })
+            index += len(line) + 2
+        elif line.startswith("- "):  # Bullet points: proper bullets, indented
+            requests.append({
+                "createParagraphBullets": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "bulletPreset": "BULLET_DISC_CIRCLE_SQUARE"
+                }
+            })
+            requests.append({
+                "updateParagraphStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "paragraphStyle": {"indentFirstLine": {"magnitude": 18, "unit": "PT"}, "indentStart": {"magnitude": 18, "unit": "PT"}},
+                    "fields": "indentFirstLine,indentStart"
+                }
+            })
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}, "weightedFontFamily": {"fontFamily": "Arial"}},
+                    "fields": "fontSize,weightedFontFamily"
+                }
+            })
+            index += len(line) + 2
+        else:  # Regular paragraphs: justified, standard spacing
+            requests.append({
+                "updateParagraphStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "paragraphStyle": {"lineSpacing": 115, "alignment": "JUSTIFIED", "spaceAbove": {"magnitude": 6, "unit": "PT"}},
+                    "fields": "lineSpacing,alignment,spaceAbove"
+                }
+            })
+            requests.append({
+                "updateTextStyle": {
+                    "range": {"startIndex": index, "endIndex": index + len(line)},
+                    "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}, "weightedFontFamily": {"fontFamily": "Arial"}},
+                    "fields": "fontSize,weightedFontFamily"
+                }
+            })
+            index += len(line) + 2
 
     if requests:
         docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
@@ -75,40 +145,24 @@ def create_fancy_doc(title, content):
 
 # Streamlit app
 st.title("Jeremy's Communication Creator")
-
-additional_input = st.text_area("Optional: Provide additional context (e.g., original email, Slack message, etc.):", "")
-doc_types = ["Formal Agreement / Contract", "Email Response", "Slack / Teams Communication", "Text Message"]
-doc_type = st.selectbox("Select the document type:", doc_types)
-page_disabled = doc_type in ["Email Response", "Slack / Teams Communication", "Text Message"]
-page_options = ["1", "2", "3", "limitless"]
-pages = st.selectbox("Select the number of pages:", page_options, disabled=page_disabled)
-styles = ["Professional yet conversational", "Formal / professional communication"]
-style = st.selectbox("Select the communication style:", styles)
-topic = st.text_input("What is this communication about:", "")
+topic = st.text_input("What is this communication about:", "I’d like to create an agreement that outlines our Network services at Veeya, what’s in/out, SLA, etc...")
 
 if st.button("Generate Doc"):
     try:
         if not topic:
             st.error("Please enter a topic.")
             st.stop()
-        title = f"{doc_type}: {topic.split()[0]}"
-        if doc_type == "Formal Agreement / Contract":
-            length_instruction = f"Ensure the document is {pages} page(s) long." if pages != "limitless" else "No page limit."
-        else:
-            length_instruction = ""
-        style_description = (
-            "Use a professional yet conversational tone, polished but approachable with a dash of wit and clarity."
-            if style == "Professional yet conversational"
-            else "Use a formal and professional tone, direct and to the point."
-        )
+        title = "Veeya Network Services Agreement"
         prompt = (
-            f"Create a {doc_type.lower()} for the following topic: '{topic}'. "
-            f"{length_instruction} "
-            f"{style_description} "
-            f"Include any relevant details from the following context: '{additional_input}'."
+            f"Create a professional agreement for the following topic: '{topic}'. "
+            f"Ensure the document is approximately 1 page long. "
+            f"Use a formal and professional tone, direct and to the point. "
+            f"Include sections for 'Parties Involved', 'Services Provided (What’s In)', 'Services Not Included (What’s Out)', "
+            f"'Service Level Agreement (SLA)', and 'Term and Termination'. "
+            f"Use bullet points for lists under each section where appropriate."
         )
         content = get_grok_text(prompt)
-        url = create_fancy_doc(title, content)
+        url = create_professional_doc(title, content)
         st.success(f"Your document is ready! [Click here to view]({url})")
     except Exception as e:
         st.error(f"Error: {str(e)}")
