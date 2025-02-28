@@ -1,0 +1,132 @@
+import streamlit as st
+from openai import OpenAI
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from google_auth_oauthlib.flow import InstalledAppFlow
+import os
+
+# xAI API setup
+xai_client = OpenAI(
+    api_key="xai-piNOtwpL5Q8Jj0UTcVNkQmbFmujGrflDDlAED5hEp3yOwJ7lddl2ed8wkP7xDrWKMUHIlJr2yfmydLq1",
+    base_url="https://api.x.ai/v1"
+)
+
+# Google API setup
+SCOPES = ["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive"]
+creds = None
+if os.path.exists("token.json"):
+    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+else:
+    flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", SCOPES)
+    creds = flow.run_local_server(port=0)
+    with open("token.json", "w") as token:
+        token.write(creds.to_json())
+
+docs_service = build("docs", "v1", credentials=creds)
+drive_service = build("drive", "v3", credentials=creds)
+
+def get_grok_text(prompt):
+    response = xai_client.chat.completions.create(
+        model="grok-2-1212",
+        messages=[{"role": "user", "content": prompt}],
+        max_tokens=500
+    )
+    return response.choices[0].message.content
+
+def create_fancy_doc(title, content):
+    doc = docs_service.documents().create(body={"title": title}).execute()
+    doc_id = doc["documentId"]
+    requests = []
+
+    # Insert all text first
+    full_text = content.replace("\n\n", "\n") + "\n"
+    requests.append({"insertText": {"location": {"index": 1}, "text": full_text}})
+    docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+    requests = []
+
+    # Apply formatting
+    lines = full_text.split("\n")
+    index = 1
+
+    for i, line in enumerate(lines):
+        line = line.strip()
+        if not line:
+            index += 1
+            continue
+        if i == 0:  # Title (centered)
+            text = line
+            requests.append({"updateParagraphStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "paragraphStyle": {"alignment": "CENTER", "spaceBelow": {"magnitude": 12, "unit": "PT"}},
+                "fields": "alignment,spaceBelow"
+            }})
+            requests.append({"updateTextStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "textStyle": {"fontSize": {"magnitude": 14, "unit": "PT"}, "bold": True, "weightedFontFamily": {"fontFamily": "Arial"}},
+                "fields": "fontSize,bold,weightedFontFamily"
+            }})
+            index += len(text) + 1
+        elif line.startswith("Clause"):  # Numbered clauses
+            text = line
+            requests.append({"updateParagraphStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "paragraphStyle": {"indentStart": {"magnitude": 18, "unit": "PT"}, "spaceBelow": {"magnitude": 6, "unit": "PT"}},
+                "fields": "indentStart,spaceBelow"
+            }})
+            requests.append({"updateTextStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}, "weightedFontFamily": {"fontFamily": "Arial"}},
+                "fields": "fontSize,weightedFontFamily"
+            }})
+            index += len(text) + 1
+        elif line.startswith("Signature"):  # Signature lines
+            text = line
+            requests.append({"updateParagraphStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "paragraphStyle": {"spaceAbove": {"magnitude": 12, "unit": "PT"}},
+                "fields": "spaceAbove"
+            }})
+            requests.append({"updateTextStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}, "weightedFontFamily": {"fontFamily": "Arial"}},
+                "fields": "fontSize,weightedFontFamily"
+            }})
+            index += len(text) + 1
+        else:  # Regular paragraph
+            text = line
+            requests.append({"updateParagraphStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "paragraphStyle": {"lineSpacing": 115},
+                "fields": "lineSpacing"
+            }})
+            requests.append({"updateTextStyle": {
+                "range": {"startIndex": index, "endIndex": index + len(text)},
+                "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}, "weightedFontFamily": {"fontFamily": "Arial"}},
+                "fields": "fontSize,weightedFontFamily"
+            }})
+            index += len(text) + 1
+
+    if requests:
+        docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
+    drive_service.permissions().create(fileId=doc_id, body={"type": "anyone", "role": "reader"}).execute()
+    return f"https://docs.google.com/document/d/{doc_id}"
+
+# Streamlit app
+st.title("Grok Doc Generator")
+topic = st.text_input("Enter your topic:", "Settlement agreement placeholder")
+title = st.text_input("Enter a title (optional):", "")
+if st.button("Generate Doc"):
+    try:
+        if not title:
+            title = f"Settlement Agreement: {topic.split()[0]}"
+        prompt = (f"Create a one-page settlement agreement for {topic}. Use a professional yet conversational tone, polished but approachable with a dash of wit and clarity. "
+                  "Include a centered title, introductory paragraph, numbered clauses (e.g., Clause 1, Clause 2), and signature lines for both parties. "
+                  "Ensure the agreement is concise, fits on one page, and includes all necessary legal details while maintaining readability.")
+        content = get_grok_text(prompt)
+        url = create_fancy_doc(title, content)
+        st.success(f"Your document is ready! [Click here to view]({url})")
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+
+if __name__ == "__main__":
+    st.run()
