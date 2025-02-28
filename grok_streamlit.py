@@ -51,27 +51,43 @@ def create_professional_doc(title, content):
     # Clean up Markdown artifacts (e.g., remove **, *, >, #)
     content = re.sub(r'[\*#>]+', '', content).strip()
 
-    # Insert all text first, adding extra newlines for spacing
-    full_text = content.replace("\n\n", "\n").replace("\n", "\n\n") + "\n\n"
+    # Split content into lines
+    lines = content.split("\n")
+    # Filter out empty lines and strip whitespace
+    lines = [line.strip() for line in lines if line.strip()]
+    # Join lines with double newlines for consistent spacing
+    full_text = "\n\n".join(lines)
+    # Remove trailing newlines to avoid index issues
+    full_text = full_text.rstrip("\n") + "\n"
     requests.append({"insertText": {"location": {"index": 1}, "text": full_text}})
     docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
     requests = []
 
-    # Apply professional formatting
-    lines = full_text.split("\n")
-    index = 1
+    # Calculate total document length
+    doc_length = len(full_text)
+    current_position = 1  # Start at index 1 (Google Docs indices start at 1)
 
+    # Apply professional formatting
     for i, line in enumerate(lines):
-        line = line.strip()
-        if not line:
-            index += 2  # Account for double newline
-            continue
         # Calculate the range for this line
-        start_index = index
-        end_index = index + len(line)
-        # Ensure the range is valid (startIndex < endIndex)
+        start_index = current_position
+        end_index = start_index + len(line)
+
+        # Debugging: Log the indices for this line
+        print(f"Line {i}: '{line}', start_index={start_index}, end_index={end_index}, doc_length={doc_length}")
+
+        # Ensure indices are within document bounds and valid
+        if start_index >= doc_length:
+            print(f"Warning: start_index {start_index} exceeds document length {doc_length}. Stopping.")
+            break
+        if end_index > doc_length:
+            print(f"Warning: end_index {end_index} exceeds document length {doc_length}. Adjusting.")
+            end_index = doc_length
         if start_index >= end_index:
-            continue  # Skip empty or invalid ranges
+            print(f"Invalid range: start_index={start_index}, end_index={end_index}. Skipping.")
+            continue
+
+        # Apply formatting based on line type
         if i == 0:  # Title: centered, bold, larger font
             requests.append({
                 "updateParagraphStyle": {
@@ -88,8 +104,9 @@ def create_professional_doc(title, content):
                 }
             })
         elif any(line.lower().startswith(x.lower()) for x in [
-            "Parties Involved", "Services Provided", "Services Not Included", 
-            "Service Level Agreement", "Term and Termination"]):
+            "parties involved", "services provided", "services not included", 
+            "service level agreement", "term and termination"
+        ]):
             # Section headings: bold, slightly larger font, spacing
             requests.append({
                 "updateParagraphStyle": {
@@ -141,9 +158,12 @@ def create_professional_doc(title, content):
                     "fields": "fontSize,weightedFontFamily"
                 }
             })
-        index = end_index + 2  # Update index for next line, accounting for double newline
+        # Update the position for the next line
+        current_position = end_index + 2  # Account for \n\n between lines
 
     if requests:
+        # Debug: Log the number of requests
+        print(f"Total requests: {len(requests)}")
         docs_service.documents().batchUpdate(documentId=doc_id, body={"requests": requests}).execute()
     drive_service.permissions().create(fileId=doc_id, body={"type": "anyone", "role": "reader"}).execute()
     return f"https://docs.google.com/document/d/{doc_id}"
@@ -168,19 +188,23 @@ if st.button("Generate Doc"):
     title = f"{doc_type}: {topic.split()[0]}"
     if doc_type == "Formal Agreement / Contract":
         length_instruction = f"Ensure the document is {pages} page(s) long." if pages != "limitless" else "No page limit."
+        prompt = (
+            f"Create a {doc_type.lower()} for the following topic: '{topic}'. "
+            f"{length_instruction} "
+            f"Use a professional yet conversational tone, polished but approachable with a dash of wit and clarity. "
+            f"Include sections for 'Parties Involved', 'Services Provided (What’s In)', 'Services Not Included (What’s Out)', "
+            f"'Service Level Agreement (SLA)', and 'Term and Termination'. "
+            f"Use bullet points for lists under each section where appropriate. "
+            f"Include any relevant details from the following context: '{additional_input}'."
+        )
     else:
         length_instruction = ""
-    style_description = (
-        "Use a professional yet conversational tone, polished but approachable with a dash of wit and clarity."
-        if style == "Professional yet conversational"
-        else "Use a formal and professional tone, direct and to the point."
-    )
-    prompt = (
-        f"Create a {doc_type.lower()} for the following topic: '{topic}'. "
-        f"{length_instruction} "
-        f"{style_description} "
-        f"Include any relevant details from the following context: '{additional_input}'."
-    )
+        prompt = (
+            f"Create a {doc_type.lower()} for the following topic: '{topic}'. "
+            f"{length_instruction} "
+            f"Use a professional yet conversational tone, polished but approachable with a dash of wit and clarity. "
+            f"Include any relevant details from the following context: '{additional_input}'."
+        )
     try:
         content = get_grok_text(prompt)
         url = create_professional_doc(title, content)
