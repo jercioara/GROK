@@ -131,7 +131,7 @@ def create_fancy_doc(title, content):
     return f"https://docs.google.com/document/d/{doc_id}"
 
 # Streamlit app
-st.title("Grok Doc Generator")
+st.title("Grok Doc Generator v2")
 topic = st.text_input("Enter your topic:", "Settlement agreement placeholder")
 title = st.text_input("Enter a title (optional):", "")
 if st.button("Generate Doc"):
