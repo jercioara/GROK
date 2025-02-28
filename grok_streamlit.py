@@ -4,23 +4,42 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google_auth_oauthlib.flow import InstalledAppFlow
 import os
+import json
+import io
 
 # xAI API setup
+xai_api_key = st.secrets.get("XAI_API_KEY", os.getenv("XAI_API_KEY"))
+if not xai_api_key:
+    st.error("xAI API key not found. Please set the XAI_API_KEY in Streamlit Cloud secrets.")
+    st.stop()
+
 xai_client = OpenAI(
-    api_key="xai-piNOtwpL5Q8Jj0UTcVNkQmbFmujGrflDDlAED5hEp3yOwJ7lddl2ed8wkP7xDrWKMUHIlJr2yfmydLq1",
+    api_key=xai_api_key,
     base_url="https://api.x.ai/v1"
 )
 
 # Google API setup
 SCOPES = ["https://www.googleapis.com/auth/documents", "https://www.googleapis.com/auth/drive"]
 creds = None
-if os.path.exists("token.json"):
+
+# Load client_secret.json from Streamlit secrets
+if "google_credentials" in st.secrets:
+    client_secret_dict = json.loads(st.secrets["google_credentials"]["client_secret_json"])
+    with open("client_secret.json", "w") as f:
+        json.dump(client_secret_dict, f)
+else:
+    st.error("Google API credentials not found. Please add client_secret_json to Streamlit Cloud secrets.")
+    st.stop()
+
+# Load token.json from Streamlit secrets
+if "google_credentials" in st.secrets and "token_json" in st.secrets["google_credentials"]:
+    token_dict = json.loads(st.secrets["google_credentials"]["token_json"])
+    with open("token.json", "w") as f:
+        json.dump(token_dict, f)
     creds = Credentials.from_authorized_user_file("token.json", SCOPES)
 else:
-    flow = InstalledAppFlow.from_client_secrets_file("client_secret.json", SCOPES)
-    creds = flow.run_local_server(port=0)
-    with open("token.json", "w") as token:
-        token.write(creds.to_json())
+    st.error("Please add token_json to Streamlit Cloud secrets under google_credentials.")
+    st.stop()
 
 docs_service = build("docs", "v1", credentials=creds)
 drive_service = build("drive", "v3", credentials=creds)
@@ -127,6 +146,3 @@ if st.button("Generate Doc"):
         st.success(f"Your document is ready! [Click here to view]({url})")
     except Exception as e:
         st.error(f"Error: {str(e)}")
-
-if __name__ == "__main__":
-    st.run()
