@@ -6,6 +6,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 import os
 import json
 import io
+import re
 
 # xAI API setup
 xai_api_key = st.secrets.get("XAI_API_KEY", os.getenv("XAI_API_KEY"))
@@ -57,6 +58,9 @@ def create_fancy_doc(title, content):
     doc_id = doc["documentId"]
     requests = []
 
+    # Clean up asterisks from the content (e.g., **Clause 1** -> Clause 1)
+    content = re.sub(r'\*\*(.*?)\*\*', r'\1', content)
+
     # Insert all text first
     full_text = content.replace("\n\n", "\n") + "\n"
     requests.append({"insertText": {"location": {"index": 1}, "text": full_text}})
@@ -72,7 +76,7 @@ def create_fancy_doc(title, content):
         if not line:
             index += 1
             continue
-        if i == 0:  # Title (centered)
+        if i == 0:  # Title (centered, larger font, bold)
             text = line
             requests.append({"updateParagraphStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
@@ -81,24 +85,24 @@ def create_fancy_doc(title, content):
             }})
             requests.append({"updateTextStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
-                "textStyle": {"fontSize": {"magnitude": 14, "unit": "PT"}, "bold": True, "weightedFontFamily": {"fontFamily": "Arial"}},
+                "textStyle": {"fontSize": {"magnitude": 16, "unit": "PT"}, "bold": True, "weightedFontFamily": {"fontFamily": "Arial"}},
                 "fields": "fontSize,bold,weightedFontFamily"
             }})
             index += len(text) + 1
-        elif line.startswith("Clause"):  # Numbered clauses
+        elif line.lower().startswith("clause"):  # Clauses (bold, slightly larger font)
             text = line
             requests.append({"updateParagraphStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
-                "paragraphStyle": {"indentStart": {"magnitude": 18, "unit": "PT"}, "spaceBelow": {"magnitude": 6, "unit": "PT"}},
-                "fields": "indentStart,spaceBelow"
+                "paragraphStyle": {"spaceAbove": {"magnitude": 8, "unit": "PT"}, "spaceBelow": {"magnitude": 6, "unit": "PT"}},
+                "fields": "spaceAbove,spaceBelow"
             }})
             requests.append({"updateTextStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
-                "textStyle": {"fontSize": {"magnitude": 11, "unit": "PT"}, "weightedFontFamily": {"fontFamily": "Arial"}},
-                "fields": "fontSize,weightedFontFamily"
+                "textStyle": {"fontSize": {"magnitude": 12, "unit": "PT"}, "bold": True, "weightedFontFamily": {"fontFamily": "Arial"}},
+                "fields": "fontSize,bold,weightedFontFamily"
             }})
             index += len(text) + 1
-        elif line.startswith("Signature"):  # Signature lines
+        elif line.lower().startswith("signature"):  # Signature lines (normal text, more space above)
             text = line
             requests.append({"updateParagraphStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
@@ -111,12 +115,12 @@ def create_fancy_doc(title, content):
                 "fields": "fontSize,weightedFontFamily"
             }})
             index += len(text) + 1
-        else:  # Regular paragraph
+        else:  # Regular paragraph (normal text, justified, 1.15 spacing)
             text = line
             requests.append({"updateParagraphStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
-                "paragraphStyle": {"lineSpacing": 115},
-                "fields": "lineSpacing"
+                "paragraphStyle": {"lineSpacing": 115, "alignment": "JUSTIFIED"},
+                "fields": "lineSpacing,alignment"
             }})
             requests.append({"updateTextStyle": {
                 "range": {"startIndex": index, "endIndex": index + len(text)},
