@@ -7,12 +7,8 @@ import os
 import json
 import io
 
-# Debug: Print available secrets
-st.write("Available secrets:", dict(st.secrets))
-
 # xAI API setup
 xai_api_key = st.secrets.get("XAI_API_KEY", os.getenv("XAI_API_KEY"))
-st.write("xAI API Key (redacted if present):", "Found" if xai_api_key else "Not Found")
 if not xai_api_key:
     st.error("xAI API key not found. Please set the XAI_API_KEY in Streamlit Cloud secrets.")
     st.stop()
